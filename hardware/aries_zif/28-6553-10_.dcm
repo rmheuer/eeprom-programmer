@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP 28-6553-10_
+D 28 (2 x 14) Pos DIP, ZIF (ZIP), 0.6" (15.24mm) Row Spacing Socket Gold Through Hole
+K
+F https://www.arieselec.com/wp-content/uploads/2020/02/10001-universal-dip-zif-test-socket.pdf
+$ENDCMP
+#
+#End Doc Library
