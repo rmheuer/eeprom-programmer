@@ -1,0 +1,13 @@
+[package]
+name = "eeprom-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dialoguer = "0.11.0"
+indicatif = "0.17.8"
+itertools = "0.13.0"
+serialport = "4.3.0"
+thiserror = "1.0.61"

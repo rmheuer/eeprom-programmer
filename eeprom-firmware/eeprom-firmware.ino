@@ -75,36 +75,59 @@ void setup() {
     pinMode(ioPins[i], INPUT);
   }
 
+  Serial.begin(9600);
+
 
   // Test
-  Serial.begin(9600);
-  delay(7000);
+  // delay(7000);
 
-  Serial.println("Writing...");
+  // Serial.println("Writing...");
 
-  for (uint8_t i = 0; i < 16; i++) {
-    write(i, i);
-  }
+  // for (uint8_t i = 0; i < 16; i++) {
+  //   write(i, i);
+  // }
 
-  delay(1000);
+  // delay(1000);
 
-  Serial.println("Reading...");
-  for (uint16_t base = 0; base < 256 * 8; base += 16) {
-    uint8_t data[16];
-    for (uint16_t offset = 0; offset <= 15; offset += 1) {
-      data[offset] = read(base + offset);
-    }
+  // Serial.println("Reading...");
+  // for (uint16_t base = 0; base < 256 * 8; base += 16) {
+  //   uint8_t data[16];
+  //   for (uint16_t offset = 0; offset <= 15; offset += 1) {
+  //     data[offset] = read(base + offset);
+  //   }
 
-    char buf[80];
-    sprintf(buf, "%03x:  %02x %02x %02x %02x %02x %02x %02x %02x   %02x %02x %02x %02x %02x %02x %02x %02x",
-            base, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]);
+  //   char buf[80];
+  //   sprintf(buf, "%03x:  %02x %02x %02x %02x %02x %02x %02x %02x   %02x %02x %02x %02x %02x %02x %02x %02x",
+  //           base, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+  //           data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]);
 
-    Serial.println(buf);
-  }
+  //   Serial.println(buf);
+  // }
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  // Wait for command
+  while (!Serial.available()) {
+    delay(1);
+  }
 
+  char command = Serial.read();
+  uint8_t page = Serial.read();
+
+  uint16_t pageAddr = page << 8;
+
+  if (command == 'r') {
+    for (int i = 0; i < 256; i++) {
+      uint16_t addr = pageAddr + i;
+      uint8_t value = read(addr);
+      Serial.write(value);
+    }
+  } else if (command == 'w') {
+    for (int i = 0; i < 256; i++) {
+      uint16_t addr = pageAddr + i;
+      uint8_t value = Serial.read();
+      write(addr, value);
+    }
+    Serial.write(0xa5); // Ack
+  }
 }
