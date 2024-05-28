@@ -4,7 +4,7 @@ mod variant;
 
 use std::{env, process};
 
-use dialoguer::Select;
+use dialoguer::{Confirm, Select};
 use error::Error;
 use indicatif::ProgressIterator;
 use itertools::Itertools;
@@ -12,35 +12,43 @@ use serial_io::Session;
 use variant::EepromVariant;
 
 enum Action {
-    ReadRom,
-    WriteRom,
+    ReadRom(String),
+    WriteRom(String),
+    EraseRom,
 }
 
 struct Config {
     action: Action,
-    file: String,
     serial_port: Option<String>,
     variant: Option<EepromVariant>,
 }
 
 impl Config {
     fn build(args: &[String]) -> Result<Config, String> {
-        if args.len() < 3 {
+        if args.len() < 2 {
             return Err("not enough arguments".into());
         }
 
         let action = match args[1].as_str() {
-            "w" | "write" => Action::WriteRom,
-            "r" | "read" => Action::ReadRom,
+            "w" | "write" => {
+                if args.len() < 3 {
+                    return Err("not enough arguments".into());
+                }
+                Action::WriteRom(args[2].clone())
+            }
+            "r" | "read" => {
+                if args.len() < 3 {
+                    return Err("not enough arguments".into());
+                }
+                Action::ReadRom(args[2].clone())
+            }
+            "e" | "erase" => Action::EraseRom,
             act => return Err(format!("invalid action: {act}")),
         };
-
-        let file = args[2].clone();
 
         // TODO: Parse serial port and variant (clap?)
         Ok(Config {
             action,
-            file,
             serial_port: None,
             variant: None,
         })
@@ -121,6 +129,19 @@ fn write_rom(
     Ok(())
 }
 
+fn erase_rom(port_name: &str, variant: EepromVariant, eeprom_size: usize) -> Result<(), Error> {
+    let mut session = Session::open(port_name, variant)?;
+
+    println!("Erasing EEPROM...");
+    let empty_page = [0; 256];
+    for page in (0..eeprom_size / 256).progress() {
+        session.write_page(page as u8, &empty_page)?;
+    }
+
+    println!("Erase successful");
+    Ok(())
+}
+
 pub fn choose_serial_port() -> String {
     // Find Teensy
     let ports = serial_io::find_serial_ports();
@@ -168,7 +189,6 @@ fn choose_variant() -> EepromVariant {
 fn run(config: Config) -> Result<(), Error> {
     let Config {
         action,
-        file,
         serial_port,
         variant,
     } = config;
@@ -178,9 +198,20 @@ fn run(config: Config) -> Result<(), Error> {
 
     let eeprom_size = variant.get_capacity();
     match action {
-        Action::ReadRom => read_rom(&port_name, variant, file, eeprom_size),
-        Action::WriteRom => write_rom(&port_name, variant, file, eeprom_size),
+        Action::ReadRom(file) => read_rom(&port_name, variant, file, eeprom_size)?,
+        Action::WriteRom(file) => write_rom(&port_name, variant, file, eeprom_size)?,
+        Action::EraseRom => {
+            if Confirm::new()
+                .with_prompt("Are you sure you want to erase the EEPROM?")
+                .interact()
+                .unwrap()
+            {
+                erase_rom(&port_name, variant, eeprom_size)?;
+            }
+        }
     }
+
+    Ok(())
 }
 
 pub fn main() {
