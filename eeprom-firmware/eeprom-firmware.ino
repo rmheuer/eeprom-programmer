@@ -1,106 +1,92 @@
-const uint8_t writeEnable = 20;
-const uint8_t outputEnable = 21;
-const uint8_t shiftClock = 11; // Also activity light - LED pin
-const uint8_t shiftData = 10;
-const uint8_t ioPins[8] = {
-  12, 13, 14, 15, 16, 17, 18, 19
-};
+#include "eeprom-io.h"
+#include "eeprom-at28c64.h"
+#include "eeprom-24lcxx.h"
 
-void setAddress(uint16_t address) {
-  uint8_t lo = address & 0xFF;
-  uint8_t hi = address >> 8;
+#define TYPE_AT28C64 0
+#define TYPE_24LCXX 1
 
-  digitalWrite(shiftClock, LOW);
-  shiftOut(shiftData, shiftClock, MSBFIRST, hi);
-  shiftOut(shiftData, shiftClock, MSBFIRST, lo);
-}
+const uint8_t activityLed = 11;
 
-void setIOMode(uint8_t mode) {
-  for (uint8_t i = 0; i < 8; i++) {
-    pinMode(ioPins[i], mode);
-  }
-}
+EepromIoAT28C64 ioAT28C64;
+EepromIo24LCxx io24LCxx;
 
-uint8_t read(uint16_t address) {
-  setAddress(address);
-
-  digitalWrite(outputEnable, LOW);
-  delayMicroseconds(1);
-
-  uint8_t value = 0;
-  for (uint8_t i = 0; i < 8; i++) {
-    if (digitalRead(ioPins[i])) {
-      value |= (1 << i);
-    }
-  }
-
-  digitalWrite(outputEnable, HIGH);
-  delayMicroseconds(1);
-
-  return value;
-}
-
-void write(uint16_t address, uint8_t value) {
-  setAddress(address);
-  setIOMode(OUTPUT);
-  for (uint8_t i = 0; i < 8; i++) {
-    digitalWrite(ioPins[i], (value & (1 << i)) != 0);
-  }
-  delayMicroseconds(1);
-
-  // Pulse write enable
-  // Must be between 100 and 1000 ns
-  digitalWrite(writeEnable, LOW);
-  delayMicroseconds(1);
-  digitalWrite(writeEnable, HIGH);
-  delayMicroseconds(1);
-  
-  // Give EEPROM time to finish write operation
-  delay(10);
-
-  setIOMode(INPUT);
-}
+EepromIo* io = nullptr;
 
 void setup() {
-  pinMode(writeEnable, OUTPUT);
-  digitalWrite(writeEnable, HIGH); // Disable write
+  ioAT28C64.setup();
+  io24LCxx.setup();
 
-  pinMode(outputEnable, OUTPUT);
-  digitalWrite(outputEnable, HIGH); // Disable read
-  
-  pinMode(shiftClock, OUTPUT);
-  pinMode(shiftData, OUTPUT);
-
-  for (uint8_t i = 0; i < 8; i++) {
-    pinMode(ioPins[i], INPUT);
-  }
+  pinMode(activityLed, OUTPUT);
+  digitalWrite(activityLed, LOW); // Inactive
 
   Serial.begin(9600);
 }
 
-void loop() {
-  // Wait for command
-  while (!Serial.available()) {
+uint8_t nextSerial() {
+  while (!Serial.available())
     delay(1);
+  return Serial.read();
+}
+
+#define WAIT_OR_TIMEOUT \
+  while (!Serial.available()) { \
+    if (millis() - lastCmdTime > 10000) \
+      goto timeout; \
+    delay(1); \
   }
 
-  char command = Serial.read();
-  uint8_t page = Serial.read();
-
-  uint16_t pageAddr = page << 8;
-
-  if (command == 'r') {
-    for (int i = 0; i < 256; i++) {
-      uint16_t addr = pageAddr + i;
-      uint8_t value = read(addr);
-      Serial.write(value);
-    }
-  } else if (command == 'w') {
-    for (int i = 0; i < 256; i++) {
-      uint16_t addr = pageAddr + i;
-      uint8_t value = Serial.read();
-      write(addr, value);
-    }
-    Serial.write(0xa5); // Ack
+void loop() {
+  // Wait for device init command
+  while (nextSerial() != 'd');
+  uint8_t eepromType = nextSerial();
+  switch (eepromType) {
+    case TYPE_AT28C64:
+      io = &ioAT28C64;
+      break;
+    case TYPE_24LCXX:
+      io = &io24LCxx;
+      break;
+    default:
+      return;
   }
+
+  // Initialize device
+  digitalWrite(activityLed, HIGH);
+  io->init();
+
+  uint64_t lastCmdTime = millis();
+  while (true) {
+    WAIT_OR_TIMEOUT;
+    uint8_t command = Serial.read();
+    lastCmdTime = millis();
+
+    if (command == 'r') { // Read page
+      WAIT_OR_TIMEOUT;
+      uint16_t pageAddr = Serial.read() << 8;
+      for (int i = 0; i < 256; i++) {
+        uint16_t addr = pageAddr + i;
+        uint8_t value = io->readByte(addr);
+        Serial.write(value);
+      }
+    } else if (command == 'w') { // Write page
+      WAIT_OR_TIMEOUT;
+      uint16_t pageAddr = Serial.read() << 8;
+      for (int i = 0; i < 256; i++) {
+        uint16_t addr = pageAddr + i;
+        WAIT_OR_TIMEOUT;
+        uint8_t value = Serial.read();
+        io->writeByte(addr, value);
+      }
+
+      // Indicate we're done and ready for more data
+      Serial.write(0xa5);
+    } else if (command == 'q') { // Quit
+      break;
+    }
+  }
+
+  timeout:
+  io->disable();
+  digitalWrite(activityLed, LOW);
+  io = nullptr;
 }
